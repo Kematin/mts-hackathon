@@ -1,0 +1,38 @@
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  lua-sandbox:
+    build:
+      context: ./lua-sandbox
+      dockerfile: sandbox.Dockerfile
+    container_name: lua-sandbox
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./app
+      dockerfile: app.Dockerfile
+    container_name: backend
+    ports:
+      - "8080:8080"
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+#     - OLLAMA_MODEL=qwen3.5:9b #ЕЩЕ РАЗ ПОВТОРЯЮ ЭТООООО НА ПРОД
+      - OLLAMA_MODEL=qwen3.5:2b #А ЭТОО НА ТЕСТ ПОТОМ НЕ ОРИТЕ ЧТО У ВАС НОУТ УМЕР ПЖПЖПЖПЖ
+      - VALIDATOR_URL=http://lua-sandbox:8081/validate
+    depends_on:
+      - ollama
+      - lua-sandbox
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

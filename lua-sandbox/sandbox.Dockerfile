@@ -1,0 +1,19 @@
+#семен тебе сюда дадададад сюда реально сюда вот тут файлики
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y \
+    lua5.4 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/lua5.4 /usr/bin/lua && \
+    ln -sf /usr/bin/luac5.4 /usr/bin/luac
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir flask
+
+COPY validator.py .
+
+EXPOSE 8081
+
+CMD ["python", "validator.py"]
