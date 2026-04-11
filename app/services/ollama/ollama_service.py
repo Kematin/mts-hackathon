@@ -83,6 +83,9 @@ class OllamaService:
     async def validate_code(
         self, request: GenerateRequest, code: str, snippets: list[str]
     ) -> str:
+        # ! Переписать функцию.
+        # ! На данный момент просто перезаписывает последний полученный code
+        # ! Использовать BaseModel схемы
         for snippet in snippets:
             try:
                 ok, error = await self.api.get_validate_status(snippet)

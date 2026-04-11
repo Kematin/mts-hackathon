@@ -1,38 +1,16 @@
 import json
-import uuid
 
 from fastapi import WebSocket
 
 from app.core.config import CONFIG
 from app.core.logger import get_logger
+from app.enums import CodeTaskStatus
+from app.schemas import CodeTask
 from app.services.ollama.get_service import get_ollama_service
+from app.services.tasks.base_task_service import BaseTaskService
+from app.services.tasks.get_service import get_task_provider
 
 logger = get_logger(__name__)
-
-# Потом заменим на бд пока рофлим
-tasks: dict[str, dict] = {}
-
-
-def make_task(prompt: str, context: str | None) -> dict:
-    """
-    Создаёт новый объект задачи с уникальным ID.
-
-    Статусы задачи:
-        pending     — задача создана, ещё не начата
-        processing  — идёт генерация или исправление кода
-        validating  — код отправлен в lua-sandbox на проверку
-        done        — код прошёл валидацию
-        failed      — исчерпаны попытки или критическая ошибка
-    """
-    return {
-        "id": str(uuid.uuid4()),
-        "prompt": prompt,
-        "context": context,
-        "status": "pending",
-        "code": None,
-        "error": None,
-        "attempts": 0,  # счётчик обращений к LLM (генерация + retry)
-    }
 
 
 async def send(ws: WebSocket, event: str, data: dict):
@@ -46,7 +24,7 @@ async def send(ws: WebSocket, event: str, data: dict):
     await ws.send_text(json.dumps({"event": event, **data}))
 
 
-async def run_pipeline(task: dict, ws: WebSocket):
+async def run_pipeline(task: CodeTask, ws: WebSocket, task_service: BaseTaskService):
     """
     Основной агентский pipeline генерации и валидации Lua-кода.
 
@@ -61,30 +39,28 @@ async def run_pipeline(task: dict, ws: WebSocket):
         ws:   WebSocket соединение с клиентом
     """
     ollama_service = get_ollama_service()
-
-    prompt = task["prompt"]
-    context = task["context"]
+    task_service.set_provider(get_task_provider(task))
 
     # --- Шаг 1: Генерация ---
-    task["status"] = "processing"
+    task_service.provider.change_status(CodeTaskStatus.processing)
     await send(ws, "status", {"status": "processing", "message": "Генерирую код..."})
 
     try:
-        code = await ollama_service.generate_code(prompt, context)
+        code = await ollama_service.generate_code(task.prompt, task.context)
     except Exception as e:
-        task["status"] = "failed"
-        task["error"] = str(e)
+        task_service.provider.change_status(CodeTaskStatus.failed)
+        task_service.provider.set_error(str(e))
         await send(ws, "error", {"message": f"Ошибка генерации: {e}"})
         return
 
-    task["attempts"] += 1
+    task_service.provider.increase_attempts(1)
     logger.info(
-        f"[{task['id']}] Сгенерирован код (попытка {task['attempts']}): {code[:100]}..."
+        f"[{task.id}] Сгенерирован код (попытка {task.attempts}): {code[:100]}..."
     )
 
     # --- Шаг 2: Валидация + Retry ---
     for attempt in range(CONFIG.ai.max_validate_retries + 1):
-        task["status"] = "validating"
+        task_service.provider.change_status(CodeTaskStatus.validating)
         await send(
             ws,
             "status",
@@ -99,7 +75,7 @@ async def run_pipeline(task: dict, ws: WebSocket):
         if not snippets:
             # Модель вернула что-то не то — нет lua{...}lua в ответе
             error_msg = "Не удалось извлечь lua{...}lua сниппеты из ответа модели"
-            logger.warning(f"[{task['id']}] {error_msg}")
+            logger.warning(f"[{task.id}] {error_msg}")
         else:
             # Валидируем каждый сниппет по очереди, останавливаемся на первой ошибке
             all_ok = True
@@ -113,17 +89,18 @@ async def run_pipeline(task: dict, ws: WebSocket):
 
             if all_ok:
                 # Все сниппеты прошли валидацию — отдаём результат
-                task["status"] = "done"
-                task["code"] = code
+                task_service.provider.change_status(CodeTaskStatus.done)
+                task_service.provider.set_code(code)
                 await send(ws, "done", {"code": code})
                 logger.info(
-                    f"[{task['id']}] Готово после {attempt + 1} попыток валидации"
+                    f"[{task.id}] Готово после {attempt + 1} попыток валидации"
                 )
                 return
 
         # Валидация упала — пробуем починить если остались попытки
         if attempt < CONFIG.ai.max_validate_retries:
-            task["attempts"] += 1
+            task_service.provider.increase_attempts(1)
+            task_service.provider.change_status(CodeTaskStatus.processing)
             await send(
                 ws,
                 "status",
@@ -132,20 +109,20 @@ async def run_pipeline(task: dict, ws: WebSocket):
                     "message": f"Исправляю ошибку: {error_msg[:100]}...",
                 },
             )
-            logger.info(f"[{task['id']}] Retry {attempt + 1}: {error_msg}")
+            logger.info(f"[{task.id}] Retry {attempt + 1}: {error_msg}")
 
             try:
                 # Передаём модели оригинальный промпт + сломанный код + текст ошибки
-                code = await ollama_service.fix_code(prompt, code, error_msg)
+                code = await ollama_service.fix_code(task.prompt, code, error_msg)
             except Exception as e:
-                task["status"] = "failed"
-                task["error"] = str(e)
+                task_service.provider.change_status(CodeTaskStatus.failed)
+                task_service.provider.set_error(str(e))
                 await send(ws, "error", {"message": f"Ошибка при исправлении: {e}"})
                 return
         else:
             # Исчерпали все попытки — отдаём последний вариант с пометкой об ошибке
-            task["status"] = "failed"
-            task["error"] = error_msg
+            task_service.provider.change_status(CodeTaskStatus.failed)
+            task_service.provider.set_error(error_msg)
             await send(
                 ws,
                 "failed",
@@ -156,6 +133,6 @@ async def run_pipeline(task: dict, ws: WebSocket):
                 },
             )
             logger.warning(
-                f"[{task['id']}] Исчерпаны попытки. Последняя ошибка: {error_msg}"
+                f"[{task.id}] Исчерпаны попытки. Последняя ошибка: {error_msg}"
             )
             return

@@ -5,17 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from app.core.logger import get_logger
 from app.schemas import GenerateRequest
 from app.services.generator import (
-    make_task,
     run_pipeline,
     send,
 )
 from app.services.ollama.get_service import get_ollama_service
 from app.services.ollama.ollama_service import OllamaService
+from app.services.tasks.base_task_service import BaseTaskService
+from app.services.tasks.get_service import get_task_service
 
 logger = get_logger(__name__)
-
-# Потом заменим на бд пока рофлим
-tasks: dict[str, dict] = {}
 
 
 router = APIRouter(prefix="", tags=["Lua Generate"])
@@ -46,7 +44,10 @@ async def generate_endpoint(
 
 
 @router.get("/health")
-async def health(ollama_service: OllamaService = Depends(get_ollama_service)):
+async def health(
+    ollama_service: OllamaService = Depends(get_ollama_service),
+    task_service: BaseTaskService = Depends(get_task_service),
+):
     """
     Проверка состояния сервисов.
 
@@ -61,12 +62,14 @@ async def health(ollama_service: OllamaService = Depends(get_ollama_service)):
     return {
         "status": "ok",
         "ollama": ollama_ok,
-        "tasks_in_memory": len(tasks),
+        "tasks_in_memory": task_service.get_task_count(),
     }
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(
+    ws: WebSocket, task_service: BaseTaskService = Depends(get_task_service)
+):
     """
     WebSocket endpoint для фронтенда.
 
@@ -107,13 +110,12 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
 
             # Создаём задачу и запускаем pipeline
-            task = make_task(prompt, context)
-            tasks[task["id"]] = task
+            task = task_service.make_task(prompt, context)
 
-            await send(ws, "task_created", {"task_id": task["id"]})
-            logger.info(f"Создана задача {task['id']}: {prompt[:80]}")
+            await send(ws, "task_created", {"task_id": task.id})
+            logger.info(f"Создана задача {task.id}: {prompt[:80]}")
 
-            await run_pipeline(task, ws)
+            await run_pipeline(task, ws, task_service)
 
     except WebSocketDisconnect:
         logger.info("WebSocket отключён")
