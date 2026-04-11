@@ -16,3 +16,20 @@ class CodeTaskStatus(Enum):
     validating = "VALIDATING"
     done = "DONE"
     failed = "FAILED"
+
+
+class WebSocketEventStatus(Enum):
+    """
+    События WebSocket /ws соединения:
+        task_created — задача принята, передаётся task_id
+        status       — промежуточный статус (processing / validating)
+        done         — успешная генерация, передаётся готовый код
+        failed       — исчерпаны попытки, передаётся последний вариант кода + ошибка
+        error        — критическая ошибка
+    """
+
+    task_created = "TASK_CREATD"
+    status = "STATUS"
+    done = "DONE"
+    failed = "FAILED"
+    error = "ERROR"

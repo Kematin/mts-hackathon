@@ -3,15 +3,11 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.core.logger import get_logger
+from app.enums import WebSocketEventStatus
 from app.schemas import GenerateRequest
-from app.services.generator import (
-    run_pipeline,
-    send,
-)
-from app.services.ollama.get_service import get_ollama_service
+from app.services import get_ollama_service, get_task_service, get_websocket_service
 from app.services.ollama.ollama_service import OllamaService
 from app.services.tasks.base_task_service import BaseTaskService
-from app.services.tasks.get_service import get_task_service
 
 logger = get_logger(__name__)
 
@@ -67,9 +63,7 @@ async def health(
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(
-    ws: WebSocket, task_service: BaseTaskService = Depends(get_task_service)
-):
+async def websocket_endpoint(ws: WebSocket):
     """
     WebSocket endpoint для фронтенда.
 
@@ -89,39 +83,29 @@ async def websocket_endpoint(
     await ws.accept()
     logger.info("WebSocket подключён")
 
+    ws_service = get_websocket_service(ws)
+
     try:
         while True:
             raw = await ws.receive_text()
+            data = await ws_service.validate_data(raw)
 
-            # Парсим входящее сообщение
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                await send(ws, "error", {"message": "Невалидный JSON"})
-                continue
-
-            prompt = data.get("prompt", "").strip()
-            context = data.get(
-                "context"
-            )  # JSON строка с wf.vars контекстом, опционально
-
-            if not prompt:
-                await send(ws, "error", {"message": "Поле prompt обязательно"})
+            if not data:
                 continue
 
             # Создаём задачу и запускаем pipeline
-            task = task_service.make_task(prompt, context)
+            task = ws_service.task_service.make_task(data.prompt, data.context)
 
-            await send(ws, "task_created", {"task_id": task.id})
-            logger.info(f"Создана задача {task.id}: {prompt[:80]}")
+            await ws_service.send(WebSocketEventStatus.task_created, {"task_id": task.id})
+            logger.info(f"Создана задача {task.id}: {data.prompt[:80]}")
 
-            await run_pipeline(task, ws, task_service)
+            await ws_service.run_pipeline(task)
 
     except WebSocketDisconnect:
         logger.info("WebSocket отключён")
     except Exception as e:
         logger.error(f"WebSocket ошибка: {e}")
         try:
-            await send(ws, "error", {"message": str(e)})
+            await ws_service.send(WebSocketEventStatus.error, {"message": str(e)})
         except Exception:
             pass
