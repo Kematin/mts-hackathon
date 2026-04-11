@@ -1,12 +1,11 @@
 import json
 import uuid
 
-import httpx
 from fastapi import WebSocket
 
 from app.core.config import CONFIG
 from app.core.logger import get_logger
-from app.services.llm import fix, generate
+from app.services.ollama.get_service import get_ollama_service
 
 logger = get_logger(__name__)
 
@@ -47,65 +46,6 @@ async def send(ws: WebSocket, event: str, data: dict):
     await ws.send_text(json.dumps({"event": event, **data}))
 
 
-async def validate_code(code: str) -> tuple[bool, str]:
-    """
-    Отправляет Lua-код в lua-sandbox валидатор на проверку.
-
-    Валидатор выполняет два шага:
-        1. Синтаксическая проверка через luac
-        2. Исполнение с mock wf-окружением через lua
-
-    Returns:
-        (True, "")             — код валиден
-        (False, "описание")    — код невалиден, описание ошибки
-
-    При недоступности валидатора возвращает (True, "") —
-    не блокируем генерацию если sandbox упал.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                CONFIG.ai.validator_url,
-                json={"code": code},
-            )
-            data = response.json()
-            return data.get("ok", False), data.get("error", "")
-    except Exception as e:
-        logger.error(f"Валидатор недоступен: {e}")
-        # Graceful degradation — пропускаем валидацию если sandbox недоступен
-        return True, ""
-
-
-def extract_lua_snippets(code_json: str) -> list[str]:
-    """
-    Извлекает все Lua-сниппеты из JSON-ответа модели.
-
-    Модель возвращает JSON вида:
-        {"key": "lua{<код>}lua", "key2": "lua{<код>}lua"}
-
-    Функция извлекает только внутренний код между lua{ и }lua
-    чтобы передать его в валидатор без обёртки.
-
-    Returns:
-        Список строк с Lua-кодом (без lua{...}lua обёртки)
-    """
-    snippets = []
-    try:
-        data = json.loads(code_json)
-        for value in data.values():
-            if (
-                isinstance(value, str)
-                and value.startswith("lua{")
-                and value.endswith("}lua")
-            ):
-                # Вырезаем код между lua{ и }lua (4 символа с начала, 4 с конца)
-                inner = value[4:-4]
-                snippets.append(inner)
-    except Exception:
-        pass
-    return snippets
-
-
 async def run_pipeline(task: dict, ws: WebSocket):
     """
     Основной агентский pipeline генерации и валидации Lua-кода.
@@ -120,6 +60,8 @@ async def run_pipeline(task: dict, ws: WebSocket):
         task: объект задачи из хранилища tasks
         ws:   WebSocket соединение с клиентом
     """
+    ollama_service = get_ollama_service()
+
     prompt = task["prompt"]
     context = task["context"]
 
@@ -128,7 +70,7 @@ async def run_pipeline(task: dict, ws: WebSocket):
     await send(ws, "status", {"status": "processing", "message": "Генерирую код..."})
 
     try:
-        code = await generate(prompt, context)
+        code = await ollama_service.generate_code(prompt, context)
     except Exception as e:
         task["status"] = "failed"
         task["error"] = str(e)
@@ -152,7 +94,7 @@ async def run_pipeline(task: dict, ws: WebSocket):
             },
         )
 
-        snippets = extract_lua_snippets(code)
+        snippets = ollama_service.formatter.extract_lua_snippets(code)
 
         if not snippets:
             # Модель вернула что-то не то — нет lua{...}lua в ответе
@@ -163,7 +105,7 @@ async def run_pipeline(task: dict, ws: WebSocket):
             all_ok = True
             error_msg = ""
             for snippet in snippets:
-                ok, err = await validate_code(snippet)
+                ok, err = await ollama_service.api.get_validate_status(snippet)
                 if not ok:
                     all_ok = False
                     error_msg = err
@@ -194,7 +136,7 @@ async def run_pipeline(task: dict, ws: WebSocket):
 
             try:
                 # Передаём модели оригинальный промпт + сломанный код + текст ошибки
-                code = await fix(prompt, code, error_msg)
+                code = await ollama_service.fix_code(prompt, code, error_msg)
             except Exception as e:
                 task["status"] = "failed"
                 task["error"] = str(e)

@@ -28,9 +28,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_v1_router
 from app.core.config import CONFIG
-from app.core.logger import get_logger
-from app.services.llm import check_ollama
+from app.core.logger import get_logger, setup_logging
+from app.services.ollama.get_service import get_ollama_service
 
+setup_logging(debug=CONFIG.debug)
 logger = get_logger(__name__)
 
 
@@ -40,7 +41,8 @@ async def lifespan(app: FastAPI):
     Выполняется при старте и остановке приложения.
     При старте проверяем доступность Ollama и наличие нужной модели.
     """
-    ok = await check_ollama()
+    ollama_service = get_ollama_service()
+    ok = await ollama_service.check_ollama()
     if ok:
         logger.info("Ollama доступна и модель загружена")
     else:

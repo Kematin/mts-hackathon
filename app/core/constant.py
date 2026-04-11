@@ -153,3 +153,5 @@ OLLAMA_OPTIONS = {
     "temperature": 0.2,  # низкая температура = более детерминированные ответы
     "think": False,  # отключаем thinking mode у qwen3.5 — экономим токены
 }
+
+OLLAMA_TIMEOUT = 120

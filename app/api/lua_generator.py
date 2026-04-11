@@ -1,17 +1,16 @@
 import json
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.core.logger import get_logger
 from app.schemas import GenerateRequest
 from app.services.generator import (
-    extract_lua_snippets,
     make_task,
     run_pipeline,
     send,
-    validate_code,
 )
-from app.services.llm import check_ollama, fix, generate
+from app.services.ollama.get_service import get_ollama_service
+from app.services.ollama.ollama_service import OllamaService
 
 logger = get_logger(__name__)
 
@@ -22,11 +21,11 @@ tasks: dict[str, dict] = {}
 router = APIRouter(prefix="", tags=["Lua Generate"])
 
 
-# ------------------------------------------
-# ДЛЯ ФРОНТА
-# ------------------------------------------
 @router.post("/generate")
-async def generate_endpoint(request: GenerateRequest):
+async def generate_endpoint(
+    request: GenerateRequest,
+    ollama_service: OllamaService = Depends(get_ollama_service),
+):
     """
     Синхронный endpoint генерации Lua-кода.
 
@@ -37,20 +36,33 @@ async def generate_endpoint(request: GenerateRequest):
     Response: {"code": "{\"key\": \"lua{...}lua\"}"}
     """
     try:
-        code = await generate(request.prompt)
-
-        # Валидируем и при необходимости делаем одну попытку исправления
-        snippets = extract_lua_snippets(code)
-        for snippet in snippets:
-            ok, error = await validate_code(snippet)
-            if not ok:
-                # Одна попытка исправить через fixer
-                code = await fix(request.prompt, code, error)
-                break
-
+        code = await ollama_service.generate_code(request.prompt)
+        snippets = ollama_service.formatter.extract_lua_snippets(code)
+        code = await ollama_service.validate_code(request, code, snippets)
         return {"code": code}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/health")
+async def health(ollama_service: OllamaService = Depends(get_ollama_service)):
+    """
+    Проверка состояния сервисов.
+
+    Response:
+        {
+            "status": "ok",
+            "ollama": true/false,       — доступна ли Ollama и загружена ли модель
+            "tasks_in_memory": 42       — количество задач в памяти
+        }
+    """
+    ollama_ok = await ollama_service.check_ollama()
+    return {
+        "status": "ok",
+        "ollama": ollama_ok,
+        "tasks_in_memory": len(tasks),
+    }
 
 
 @router.websocket("/ws")
@@ -111,29 +123,3 @@ async def websocket_endpoint(ws: WebSocket):
             await send(ws, "error", {"message": str(e)})
         except Exception:
             pass
-
-
-# ------------------------------------------
-# ВСЕ
-# ------------------------------------------
-
-
-# Рофлофункция для мониторинга состояния системы
-@router.get("/health")
-async def health():
-    """
-    Проверка состояния сервисов.
-
-    Response:
-        {
-            "status": "ok",
-            "ollama": true/false,       — доступна ли Ollama и загружена ли модель
-            "tasks_in_memory": 42       — количество задач в памяти
-        }
-    """
-    ollama_ok = await check_ollama()
-    return {
-        "status": "ok",
-        "ollama": ollama_ok,
-        "tasks_in_memory": len(tasks),
-    }
