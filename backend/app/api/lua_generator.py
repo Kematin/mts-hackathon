@@ -28,10 +28,7 @@ async def generate_endpoint(
     Response: {"code": "{\"key\": \"lua{...}lua\"}"}
     """
     try:
-        code = await ollama_service.generate_code(request.prompt)
-        snippets = ollama_service.formatter.extract_lua_snippets(code)
-        code = await ollama_service.validate_code(request, code, snippets)
-        return {"code": code}
+        return await ollama_service.run_pipeline(request)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -91,7 +88,6 @@ async def websocket_endpoint(ws: WebSocket):
             if not data:
                 continue
 
-            # Создаём задачу и запускаем pipeline
             task = ws_service.task_service.make_task(data.prompt, data.context)
 
             await ws_service.send(

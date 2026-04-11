@@ -33,7 +33,9 @@ class WebSocketService:
 
         Пример: {"event": "done", "code": "{\"result\": \"lua{...}lua\"}"}
         """
-        await self.ws.send_text(json.dumps({"event": event.value, **data}))
+        await self.ws.send_text(
+            json.dumps({"event": event.value, **data}, ensure_ascii=False)
+        )
 
     async def validate_data(self, raw: str) -> Optional[WebSocketCodeData]:
         try:
@@ -112,7 +114,9 @@ class WebSocketService:
                 all_ok = True
                 error_msg = ""
                 for snippet in snippets:
-                    ok, err = await self.ollama_service.api.get_validate_status(snippet)
+                    ok, err = await self.ollama_service.api.get_validate_status(
+                        snippet.content
+                    )
                     if not ok:
                         all_ok = False
                         error_msg = err

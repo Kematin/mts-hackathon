@@ -1,5 +1,7 @@
 import json
 
+from app.schemas import Code
+
 
 class OllamaFormatter:
     @classmethod
@@ -32,13 +34,17 @@ class OllamaFormatter:
         # Ищем первый { и последний } — берём всё между ними
         start = raw.find("{")
         end = raw.rfind("}")
-        if start == -1 or end == -1:
+        if start == -1:
             raise ValueError(f"JSON не найден в ответе модели: {raw!r}")
+        if end == -1 or end < start:
+            raise ValueError(
+                f"Ответ модели обрезан (превышен лимит токенов): {raw[start:start+200]!r}..."
+            )
 
         return raw[start : end + 1]
 
     @classmethod
-    def extract_lua_snippets(cls, code_json: str) -> list[str]:
+    def extract_lua_snippets(cls, json_code: str) -> list[Code]:
         """
         Извлекает все Lua-сниппеты из JSON-ответа модели.
 
@@ -53,7 +59,7 @@ class OllamaFormatter:
         """
         snippets = []
         try:
-            data = json.loads(code_json)
+            data = json.loads(json_code)
             for value in data.values():
                 if (
                     isinstance(value, str)
@@ -62,7 +68,7 @@ class OllamaFormatter:
                 ):
                     # Вырезаем код между lua{ и }lua (4 символа с начала, 4 с конца)
                     inner = value[4:-4]
-                    snippets.append(inner)
+                    snippets.append(Code(content=inner))
         except Exception:
             pass
         return snippets

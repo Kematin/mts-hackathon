@@ -21,6 +21,10 @@ class CodeTask(BaseModel):
     context: Optional[str] = None
 
 
+class Code(BaseModel):
+    content: str
+
+
 class WebSocketCodeData(BaseModel):
     prompt: str
     context: Optional[str] = None

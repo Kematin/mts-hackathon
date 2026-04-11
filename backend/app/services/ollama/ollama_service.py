@@ -3,7 +3,7 @@ from typing import Type
 from app.core.config import CONFIG
 from app.core.constant import RETRY_SYSTEM_PROMPT, SYSTEM_PROMPT
 from app.core.logger import get_logger
-from app.schemas import GenerateRequest
+from app.schemas import Code, GenerateRequest
 from app.services.ollama.api import OllamaApi
 from app.services.ollama.formatter import OllamaFormatter
 
@@ -15,6 +15,12 @@ class OllamaService:
 
     def __init__(self, ollama_api: OllamaApi):
         self.api: OllamaApi = ollama_api
+
+    async def run_pipeline(self, request: GenerateRequest) -> list[Code]:
+        raw_json_code = await self.generate_code(request.prompt)
+        snippets = self.formatter.extract_lua_snippets(raw_json_code)
+        validated_snippets = await self.validate_and_fix_code(request.prompt, snippets)
+        return validated_snippets
 
     async def generate_code(self, user_prompt: str, context: str | None = None) -> str:
         """
@@ -80,22 +86,20 @@ class OllamaService:
         available = await self.api.get_avaliable_models()
         return any(CONFIG.ai.ollama_model in m for m in available)
 
-    async def validate_code(
-        self, request: GenerateRequest, code: str, snippets: list[str]
-    ) -> str:
-        # ! Переписать функцию.
-        # ! На данный момент просто перезаписывает последний полученный code
-        # ! Использовать BaseModel схемы
+    async def validate_and_fix_code(
+        self, user_prompt: str, snippets: list[Code]
+    ) -> list[Code]:
         for snippet in snippets:
             try:
-                ok, error = await self.api.get_validate_status(snippet)
+                ok, error = await self.api.get_validate_status(snippet.content)
             except Exception as e:
                 # Graceful degradation — пропускаем валидацию если sandbox недоступен
                 logger.error(f"Валидатор недоступен: {e}")
                 ok, error = True, ""
 
             if not ok:
-                code = await self.fix_code(request.prompt, code, error)
-                break
+                fixed_code = await self.fix_code(user_prompt, snippet.content, error)
+                snippet.content = fixed_code
 
-        return code
+        logger.debug(snippets)
+        return snippets
