@@ -7,7 +7,43 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
+  ollama-pull:
+    image: ollama/ollama
+    container_name: ollama-pull-init
+    depends_on:
+      ollama:
+        condition: service_healthy  
+    environment:
+      - OLLAMA_HOST=ollama:11434     
+    entrypoint: ["/bin/sh", "-c"]
+    command:       
+    - |
+        echo "Waiting for Ollama API to be ready..."
+        sleep 3
+
+        echo "Pulling model: ${OLLAMA_MODEL}"
+        ollama pull ${OLLAMA_MODEL}
+
+        echo "Verifying model is fully ready..."
+        # Ждём, пока модель реально ответит на простой запрос
+        until ollama run ${OLLAMA_MODEL} "test" 2>/dev/null | grep -q .; do
+          echo "Model still loading into memory, retrying in 2s..."
+          sleep 2
+        done
+
+        echo "Model ${OLLAMA_MODEL} is ready for inference!"
+    restart: "no"
+    networks:
+      - app_network
   lua-sandbox:
     build:
       context: ./lua-sandbox
@@ -16,7 +52,11 @@ services:
     ports:
       - "8081:8081"
     restart: unless-stopped
-
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    networks:
+      - app_network
   backend:
     build:
       context: ./app
@@ -27,12 +67,20 @@ services:
     environment:
       - OLLAMA_URL=http://ollama:11434
 #     - OLLAMA_MODEL=qwen3.5:9b #ЕЩЕ РАЗ ПОВТОРЯЮ ЭТООООО НА ПРОД
-      - OLLAMA_MODEL=qwen3.5:2b #А ЭТОО НА ТЕСТ ПОТОМ НЕ ОРИТЕ ЧТО У ВАС НОУТ УМЕР ПЖПЖПЖПЖ
+      - OLLAMA_MODEL=${OLLAMA_MODEL} #А ЭТОО НА ТЕСТ ПОТОМ НЕ ОРИТЕ ЧТО У ВАС НОУТ УМЕР ПЖПЖПЖПЖ
       - VALIDATOR_URL=http://lua-sandbox:8081/validate
     depends_on:
-      - ollama
-      - lua-sandbox
+      ollama-pull:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+      lua-sandbox:
+        condition: service_started
     restart: unless-stopped
-
+    networks:
+      - app_network
+networks:
+  app_network:
+    driver: bridge
 volumes:
   ollama_data:
