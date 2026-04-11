@@ -81,15 +81,21 @@ class OllamaApi:
             "model": CONFIG.ai.ollama_model,
             "stream": False,
             "options": OLLAMA_OPTIONS,
+            "format": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "string"
+                }
+            },
             "messages": [
                 {"role": "system", "content": system},
-                # /no_think — директива для qwen3.5 пропустить этап размышлений
                 {"role": "user", "content": "/no_think\n\n" + user},
             ],
         }
 
         data = await self.request("POST", "/api/chat", json=payload)
         return data["message"]["content"].strip()
+    
 
     async def get_avaliable_models(self) -> list[str]:
         """

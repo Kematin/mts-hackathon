@@ -1,13 +1,16 @@
-#тут был полупрофессионал....
 FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install uv --no-cache-dir
 
-COPY . .
+COPY pyproject.toml .
+COPY uv.lock .
+
+RUN uv sync --frozen
+
+COPY app/ ./app/
 
 EXPOSE 8080
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${API_PORT}"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
