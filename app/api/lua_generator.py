@@ -1,5 +1,3 @@
-import json
-
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.core.logger import get_logger
@@ -96,7 +94,9 @@ async def websocket_endpoint(ws: WebSocket):
             # Создаём задачу и запускаем pipeline
             task = ws_service.task_service.make_task(data.prompt, data.context)
 
-            await ws_service.send(WebSocketEventStatus.task_created, {"task_id": task.id})
+            await ws_service.send(
+                WebSocketEventStatus.task_created, {"task_id": task.id}
+            )
             logger.info(f"Создана задача {task.id}: {data.prompt[:80]}")
 
             await ws_service.run_pipeline(task)

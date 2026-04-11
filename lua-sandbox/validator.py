@@ -1,7 +1,7 @@
 """
 validator.py — изолированный сервис валидации Lua-кода.
 
-Запускается как отдельный Flask-сервис внутри lua-sandbox Docker контейнера.
+Запускается как отдельный FastAPI-сервис внутри lua-sandbox Docker контейнера.
 Принимает Lua-код от бэкенда и проверяет его в два шага:
     1. Синтаксическая проверка через luac (быстро, без исполнения)
     2. Исполнение с mock wf-окружением через lua (проверка runtime ошибок)
@@ -13,12 +13,15 @@ validator.py — изолированный сервис валидации Lua-
 Изоляция в Docker контейнере защищает хост от потенциально опасного кода.
 """
 
+import os
 import subprocess
 import tempfile
-import os
-from flask import Flask, request, jsonify
 
-app = Flask(__name__)
+import uvicorn
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI(title="Lua Sandbox Validator")
 
 # Таймаут исполнения Lua-кода в секундах.
 # Защищает от бесконечных циклов в сгенерированном коде.
@@ -65,6 +68,21 @@ _utils = {
 """
 
 
+class ValidateRequest(BaseModel):
+    code: str
+
+
+class ValidateResponse(BaseModel):
+    ok: bool
+    error: str = ""
+
+
+class HealthResponse(BaseModel):
+    status: str
+    lua: bool
+    luac: bool
+
+
 def validate(lua_code: str) -> tuple[bool, str]:
     """
     Валидирует Lua-код в два шага.
@@ -86,15 +104,13 @@ def validate(lua_code: str) -> tuple[bool, str]:
     """
 
     # --- Шаг 1: синтаксическая проверка ---
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".lua", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False) as f:
         f.write(lua_code)
         tmp_path = f.name
 
     try:
         result = subprocess.run(
-            ["luac", "-p", tmp_path],   # -p = parse only, не создаёт .out файл
+            ["luac", "-p", tmp_path],  # -p = parse only, не создаёт .out файл
             capture_output=True,
             text=True,
             timeout=LUA_TIMEOUT,
@@ -104,16 +120,13 @@ def validate(lua_code: str) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, "Timeout при синтаксической проверке"
     finally:
-        # Всегда удаляем временный файл
         os.unlink(tmp_path)
 
     # --- Шаг 2: исполнение с mock-окружением ---
     # Prepend mock перед кодом пользователя чтобы wf и _utils были доступны
     full_code = WF_MOCK + "\n" + lua_code
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".lua", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False) as f:
         f.write(full_code)
         tmp_path = f.name
 
@@ -122,7 +135,7 @@ def validate(lua_code: str) -> tuple[bool, str]:
             ["lua", tmp_path],
             capture_output=True,
             text=True,
-            timeout=LUA_TIMEOUT,    # защита от бесконечных циклов
+            timeout=LUA_TIMEOUT,  # защита от бесконечных циклов
         )
         if result.returncode != 0:
             return False, f"Ошибка исполнения: {result.stderr.strip()}"
@@ -134,8 +147,8 @@ def validate(lua_code: str) -> tuple[bool, str]:
     return True, ""
 
 
-@app.post("/validate")
-def validate_endpoint():
+@app.post("/validate", response_model=ValidateResponse)
+def validate_endpoint(body: ValidateRequest):
     """
     Валидирует Lua-код.
 
@@ -143,16 +156,11 @@ def validate_endpoint():
     Response: {"ok": true, "error": ""}
               {"ok": false, "error": "описание ошибки"}
     """
-    data = request.get_json()
-    if not data or "code" not in data:
-        return jsonify({"ok": False, "error": "Поле code обязательно"}), 400
-
-    code = data["code"]
-    ok, error = validate(code)
-    return jsonify({"ok": ok, "error": error})
+    ok, error = validate(body.code)
+    return ValidateResponse(ok=ok, error=error)
 
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse)
 def health():
     """
     Проверяет доступность lua и luac интерпретаторов.
@@ -163,12 +171,8 @@ def health():
     """
     lua_ok = subprocess.run(["lua", "-v"], capture_output=True).returncode == 0
     luac_ok = subprocess.run(["luac", "-v"], capture_output=True).returncode == 0
-    return jsonify({
-        "status": "ok",
-        "lua": lua_ok,
-        "luac": luac_ok,
-    })
+    return HealthResponse(status="ok", lua=lua_ok, luac=luac_ok)
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8081)
+    uvicorn.run("validator:app", host="0.0.0.0", port=8081)
