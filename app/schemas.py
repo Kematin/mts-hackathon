@@ -19,3 +19,8 @@ class CodeTask(BaseModel):
     code: Optional[str] = None
     error: Optional[str] = None
     context: Optional[str] = None
+
+
+class WebSocketCodeData(BaseModel):
+    prompt: str
+    context: Optional[str] = None

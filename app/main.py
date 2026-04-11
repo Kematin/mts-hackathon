@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import api_v1_router
 from app.core.config import CONFIG
 from app.core.logger import get_logger, setup_logging
-from app.services.ollama.get_service import get_ollama_service
+from app.services import get_ollama_service
 
 setup_logging(debug=CONFIG.debug)
 logger = get_logger(__name__)
