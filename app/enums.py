@@ -28,7 +28,7 @@ class WebSocketEventStatus(Enum):
         error        — критическая ошибка
     """
 
-    task_created = "TASK_CREATD"
+    task_created = "TASK_CREATED"
     status = "STATUS"
     done = "DONE"
     failed = "FAILED"

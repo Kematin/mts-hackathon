@@ -154,4 +154,4 @@ OLLAMA_OPTIONS = {
     "think": False,  # отключаем thinking mode у qwen3.5 — экономим токены
 }
 
-OLLAMA_TIMEOUT = 120
+OLLAMA_TIMEOUT = 300

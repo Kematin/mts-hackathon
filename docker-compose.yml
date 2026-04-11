@@ -21,12 +21,12 @@ services:
     container_name: ollama-pull-init
     depends_on:
       ollama:
-        condition: service_healthy  
+        condition: service_healthy
     environment:
-      - OLLAMA_HOST=ollama:11434     
+      - OLLAMA_HOST=ollama:11434
     entrypoint: ["/bin/sh", "-c"]
-    command:       
-    - |
+    command:
+      - |
         echo "Waiting for Ollama API to be ready..."
         sleep 3
 
@@ -34,7 +34,6 @@ services:
         ollama pull ${OLLAMA_MODEL}
 
         echo "Verifying model is fully ready..."
-        # Ждём, пока модель реально ответит на простой запрос
         until ollama run ${OLLAMA_MODEL} "test" 2>/dev/null | grep -q .; do
           echo "Model still loading into memory, retrying in 2s..."
           sleep 2
@@ -44,6 +43,7 @@ services:
     restart: "no"
     networks:
       - app_network
+
   lua-sandbox:
     build:
       context: ./lua-sandbox
@@ -57,17 +57,17 @@ services:
         condition: service_completed_successfully
     networks:
       - app_network
+
   backend:
     build:
-      context: ./app
-      dockerfile: app.Dockerfile
+      context: .
+      dockerfile: app/app.Dockerfile
     container_name: backend
     ports:
       - "8080:8080"
     environment:
       - OLLAMA_URL=http://ollama:11434
-#     - OLLAMA_MODEL=qwen3.5:9b #ЕЩЕ РАЗ ПОВТОРЯЮ ЭТООООО НА ПРОД
-      - OLLAMA_MODEL=${OLLAMA_MODEL} #А ЭТОО НА ТЕСТ ПОТОМ НЕ ОРИТЕ ЧТО У ВАС НОУТ УМЕР ПЖПЖПЖПЖ
+      - OLLAMA_MODEL=${OLLAMA_MODEL}  # 9b — прод; 2b — тест
       - VALIDATOR_URL=http://lua-sandbox:8081/validate
     depends_on:
       ollama-pull:
@@ -79,8 +79,10 @@ services:
     restart: unless-stopped
     networks:
       - app_network
+
 networks:
   app_network:
     driver: bridge
+
 volumes:
   ollama_data:
