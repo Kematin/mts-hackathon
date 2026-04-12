@@ -184,7 +184,11 @@ export default function ChatWindow({ messages, isLoading, onSuggestionClick }) {
                     {msg.text}
                   </ReactMarkdown>
                 </div>
-                {msg.role === "user" ? "" :
+                {msg.role === "user" ? 
+                  (<span className="text-xs text-gray-500  my-2 pl-1">
+                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>) 
+                    :
                   (<div className="flex flex-row items-center justify-between w-full my-2 pl-1">
                     <span className="text-xs text-gray-500">
                       {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
