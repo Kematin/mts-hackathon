@@ -1,7 +1,8 @@
+import json
 from typing import Type
 
 from app.core.config import CONFIG
-from app.core.constant import RETRY_SYSTEM_PROMPT, SYSTEM_PROMPT
+from app.core.constant import CLARIFIER_SYSTEM_PROMPT, RETRY_SYSTEM_PROMPT, SYSTEM_PROMPT
 from app.core.logger import get_logger
 from app.schemas import GenerateRequest
 from app.services.ollama.api import OllamaApi
@@ -34,6 +35,32 @@ class OllamaService:
 
         raw_answer = await self.api.create_chat_message(RETRY_SYSTEM_PROMPT, user_message, history)
         return self.formatter.extract_json(raw_answer)
+
+    async def clarify(self, user_prompt: str, context: str | None = None) -> dict:
+        """
+        Проверяет нужно ли уточнение перед генерацией.
+
+        Returns:
+            {"need_clarification": True, "question": "вопрос"} — нужно уточнение
+            {"need_clarification": False, "question": ""}      — можно генерировать
+        """
+        user_message = user_prompt
+        if context:
+            user_message = f"{user_prompt}\n\nКонтекст:\n{context}"
+
+        try:
+            raw = await self.api.create_chat_message(CLARIFIER_SYSTEM_PROMPT, user_message)
+            result = self.formatter.extract_json(raw)
+            data = json.loads(result)
+            return {
+                "need_clarification": bool(data.get("need_clarification", False)),
+                "question": data.get("question", "")
+            }
+        except Exception as e:
+            logger.error(f"Clarifier ошибка: {e}")
+            # При ошибке — не блокируем, просто генерируем
+            return {"need_clarification": False, "question": ""}
+
 
     async def check_ollama(self) -> bool:
         """

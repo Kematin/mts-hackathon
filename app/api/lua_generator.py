@@ -77,6 +77,7 @@ async def websocket_endpoint(ws: WebSocket):
         {"event": "done", "code": "{...}"}
         {"event": "failed", "code": "{...}", "error": "...", "message": "..."}
         {"event": "error", "message": "..."}
+        {"event": "clarification", "question": "..."}
 
     Соединение остаётся открытым — клиент может отправлять несколько задач подряд.
     """
@@ -85,8 +86,12 @@ async def websocket_endpoint(ws: WebSocket):
 
     ws_service = get_websocket_service(ws)
 
-    # История живет на уровне сессии
+    # История живёт на уровне сессии — одно соединение = один диалог
     session_history: list[dict] = []
+
+    # Флаг — ожидаем ли мы ответ на уточняющий вопрос от clarifier
+    # Если True — пропускаем clarifier и сразу генерируем код
+    awaiting_clarification: bool = False
 
     try:
         while True:
@@ -96,17 +101,30 @@ async def websocket_endpoint(ws: WebSocket):
             if not data:
                 continue
 
-            # Создаём задачу и запускаем pipeline
+            # Создаём задачу с текущей историей сессии
             task = ws_service.task_service.make_task(data.prompt, data.context)
             task.history = session_history
+
+            # Если пользователь отвечает на уточняющий вопрос —
+            # добавляем его ответ в историю и пропускаем clarifier
+            if awaiting_clarification:
+                task.history.append({"role": "user", "content": data.prompt})
+                task.skip_clarification = True
+                awaiting_clarification = False
+            else:
+                task.skip_clarification = False
 
             await ws_service.send(WebSocketEventStatus.task_created, {"task_id": task.id})
             logger.info(f"Создана задача {task.id}: {data.prompt[:80]}")
 
             await ws_service.run_pipeline(task)
 
-            # После выполнения pipeline обновляем историю сессии
+            # После pipeline обновляем историю сессии
             session_history = task.history
+
+            # Если pipeline завершился clarification — ждём ответа пользователя
+            if task.history and task.history[-1]["role"] == "assistant" and not task.code:
+                awaiting_clarification = True
 
     except WebSocketDisconnect:
         logger.info("WebSocket отключён")

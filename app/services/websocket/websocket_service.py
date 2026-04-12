@@ -80,6 +80,20 @@ class WebSocketService:
         """
         self.task_service.set_provider(get_task_provider(task))
 
+        # --- Шаг 0: Clarifier — нужно ли уточнение? ---
+        if not task.skip_clarification:
+            clarification = await self.ollama_service.clarify(task.prompt, task.context)
+
+            if clarification["need_clarification"]:
+                await self.send(
+                    WebSocketEventStatus.clarification,
+                    {"question": clarification["question"]}
+                )
+                # Сохраняем вопрос в истории чтобы модель помнила что спрашивала
+                task.history.append({"role": "assistant", "content": clarification["question"]})
+                logger.info(f"[{task.id}] Clarifier задал вопрос: {clarification['question']}")
+                return
+
         history = self._trim_history(task.history)
 
         # --- Шаг 1: Генерация ---

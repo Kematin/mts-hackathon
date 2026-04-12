@@ -20,6 +20,7 @@ class CodeTask(BaseModel):
     error: Optional[str] = None
     context: Optional[str] = None
     history: list[dict] = [] #КОНТЕКСТ ЧАТА
+    skip_clarification: bool = False
 
 
 class WebSocketCodeData(BaseModel):
