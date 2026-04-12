@@ -19,6 +19,7 @@ class CodeTask(BaseModel):
     code: Optional[str] = None
     error: Optional[str] = None
     context: Optional[str] = None
+    history: list[dict] = [] #КОНТЕКСТ ЧАТА
 
 
 class WebSocketCodeData(BaseModel):

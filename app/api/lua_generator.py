@@ -85,6 +85,9 @@ async def websocket_endpoint(ws: WebSocket):
 
     ws_service = get_websocket_service(ws)
 
+    # История живет на уровне сессии
+    session_history: list[dict] = []
+
     try:
         while True:
             raw = await ws.receive_text()
@@ -95,11 +98,15 @@ async def websocket_endpoint(ws: WebSocket):
 
             # Создаём задачу и запускаем pipeline
             task = ws_service.task_service.make_task(data.prompt, data.context)
+            task.history = session_history
 
             await ws_service.send(WebSocketEventStatus.task_created, {"task_id": task.id})
             logger.info(f"Создана задача {task.id}: {data.prompt[:80]}")
 
             await ws_service.run_pipeline(task)
+
+            # После выполнения pipeline обновляем историю сессии
+            session_history = task.history
 
     except WebSocketDisconnect:
         logger.info("WebSocket отключён")
