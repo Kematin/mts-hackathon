@@ -1,10 +1,11 @@
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+
 from app.core.logger import get_logger
 from app.enums import WebSocketEventStatus
 from app.schemas import GenerateRequest
 from app.services import get_ollama_service, get_task_service, get_websocket_service
 from app.services.ollama.ollama_service import OllamaService
 from app.services.tasks.base_task_service import BaseTaskService
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 logger = get_logger(__name__)
 
@@ -26,11 +27,7 @@ async def generate_endpoint(
     Request:  {"prompt": "текст задачи"}
     Response: {"code": "{\"key\": \"lua{...}lua\"}"}
     """
-    try:
-        return await ollama_service.run_pipeline(request)
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await ollama_service.run_pipeline(request)
 
 
 @router.get("/health")

@@ -1,6 +1,8 @@
 import json
 from typing import Type
 
+from fastapi import HTTPException, status
+
 from app.core.config import CONFIG
 from app.core.constant import (
     CLARIFIER_SYSTEM_PROMPT,
@@ -11,6 +13,12 @@ from app.core.logger import get_logger
 from app.schemas import Code, GenerateRequest
 from app.services.ollama.api import OllamaApi
 from app.services.ollama.formatter import OllamaFormatter
+from app.services.ollama.handlers import (
+    FixerHandler,
+    GeneratorHandler,
+    PipelineContext,
+    ValidatorHandler,
+)
 
 logger = get_logger(__name__)
 
@@ -21,11 +29,26 @@ class OllamaService:
     def __init__(self, ollama_api: OllamaApi):
         self.api: OllamaApi = ollama_api
 
+    def _build_chain_pipeline(self) -> GeneratorHandler:
+        generator = GeneratorHandler(self.api)
+        validator = ValidatorHandler(self.api)
+        fixer = FixerHandler(self.api)
+
+        generator.set_next(validator).set_next(fixer)
+        return generator
+
     async def run_pipeline(self, request: GenerateRequest) -> list[Code]:
-        raw_json_code = await self.generate_code(request.prompt)
-        snippets = self.formatter.extract_lua_snippets(raw_json_code)
-        validated_snippets = await self.validate_and_fix_code(request.prompt, snippets)
-        return validated_snippets
+        chain = self._build_chain_pipeline()
+        context = PipelineContext(prompt=request.prompt)
+        try:
+            result = await chain.handle(context)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+        return result.snippets
 
     async def generate_code(
         self, user_prompt: str, context: str | None = None, history: list[dict] = []

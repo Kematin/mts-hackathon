@@ -19,12 +19,14 @@ class CodeTask(BaseModel):
     code: Optional[str] = None
     error: Optional[str] = None
     context: Optional[str] = None
-    history: list[dict] = [] #КОНТЕКСТ ЧАТА
+    history: list[dict] = []  # КОНТЕКСТ ЧАТА
     skip_clarification: bool = False
 
 
 class Code(BaseModel):
     content: str
+    is_valid: bool = True
+    validation_error: Optional[str] = None
 
 
 class WebSocketCodeData(BaseModel):
