@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-
 from app.core.logger import get_logger
 from app.enums import WebSocketEventStatus
 from app.schemas import GenerateRequest
 from app.services import get_ollama_service, get_task_service, get_websocket_service
 from app.services.ollama.ollama_service import OllamaService
 from app.services.tasks.base_task_service import BaseTaskService
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 logger = get_logger(__name__)
 
@@ -72,6 +71,7 @@ async def websocket_endpoint(ws: WebSocket):
         {"event": "done", "code": "{...}"}
         {"event": "failed", "code": "{...}", "error": "...", "message": "..."}
         {"event": "error", "message": "..."}
+        {"event": "clarification", "question": "..."}
 
     Соединение остаётся открытым — клиент может отправлять несколько задач подряд.
     """
@@ -79,6 +79,13 @@ async def websocket_endpoint(ws: WebSocket):
     logger.info("WebSocket подключён")
 
     ws_service = get_websocket_service(ws)
+
+    # История живёт на уровне сессии — одно соединение = один диалог
+    session_history: list[dict] = []
+
+    # Флаг — ожидаем ли мы ответ на уточняющий вопрос от clarifier
+    # Если True — пропускаем clarifier и сразу генерируем код
+    awaiting_clarification: bool = False
 
     try:
         while True:
@@ -88,7 +95,18 @@ async def websocket_endpoint(ws: WebSocket):
             if not data:
                 continue
 
+            # Создаём задачу с текущей историей сессии
             task = ws_service.task_service.make_task(data.prompt, data.context)
+            task.history = session_history
+
+            # Если пользователь отвечает на уточняющий вопрос —
+            # добавляем его ответ в историю и пропускаем clarifier
+            if awaiting_clarification:
+                task.history.append({"role": "user", "content": data.prompt})
+                task.skip_clarification = True
+                awaiting_clarification = False
+            else:
+                task.skip_clarification = False
 
             await ws_service.send(
                 WebSocketEventStatus.task_created, {"task_id": task.id}
@@ -96,6 +114,17 @@ async def websocket_endpoint(ws: WebSocket):
             logger.info(f"Создана задача {task.id}: {data.prompt[:80]}")
 
             await ws_service.run_pipeline(task)
+
+            # После pipeline обновляем историю сессии
+            session_history = task.history
+
+            # Если pipeline завершился clarification — ждём ответа пользователя
+            if (
+                task.history
+                and task.history[-1]["role"] == "assistant"
+                and not task.code
+            ):
+                awaiting_clarification = True
 
     except WebSocketDisconnect:
         logger.info("WebSocket отключён")

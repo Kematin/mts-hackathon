@@ -19,6 +19,8 @@ class CodeTask(BaseModel):
     code: Optional[str] = None
     error: Optional[str] = None
     context: Optional[str] = None
+    history: list[dict] = [] #КОНТЕКСТ ЧАТА
+    skip_clarification: bool = False
 
 
 class Code(BaseModel):

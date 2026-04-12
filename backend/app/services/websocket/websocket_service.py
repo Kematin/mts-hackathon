@@ -13,6 +13,9 @@ from app.services.tasks.get_service import get_task_provider
 
 logger = get_logger(__name__)
 
+# Максимальное количество сообщений в истории
+# Ограничиваем чтобы не переполнить контекст num_ctx=4096
+MAX_HISTORY = 6 
 
 class WebSocketService:
     def __init__(
@@ -54,6 +57,15 @@ class WebSocketService:
             return None
 
         return WebSocketCodeData(prompt=prompt, context=context)
+    
+    def _trim_history(self, history: list[dict]) -> list[dict]:
+        """
+        Обрезает историю до MAX_HISTORY последних сообщений.
+        Берём всегда парами (user + assistant) чтобы не сломать контекст.
+        """
+        if len(history) <= MAX_HISTORY:
+            return history
+        return history[-MAX_HISTORY:]
 
     async def run_pipeline(self, task: CodeTask):
         """
@@ -70,6 +82,22 @@ class WebSocketService:
         """
         self.task_service.set_provider(get_task_provider(task))
 
+        # --- Шаг 0: Clarifier — нужно ли уточнение? ---
+        if not task.skip_clarification:
+            clarification = await self.ollama_service.clarify(task.prompt, task.context)
+
+            if clarification["need_clarification"]:
+                await self.send(
+                    WebSocketEventStatus.clarification,
+                    {"question": clarification["question"]}
+                )
+                # Сохраняем вопрос в истории чтобы модель помнила что спрашивала
+                task.history.append({"role": "assistant", "content": clarification["question"]})
+                logger.info(f"[{task.id}] Clarifier задал вопрос: {clarification['question']}")
+                return
+
+        history = self._trim_history(task.history)
+
         # --- Шаг 1: Генерация ---
         self.task_service.provider.change_status(CodeTaskStatus.processing)
         await self.send(
@@ -78,7 +106,9 @@ class WebSocketService:
         )
 
         try:
-            code = await self.ollama_service.generate_code(task.prompt, task.context)
+            code = await self.ollama_service.generate_code(
+                task.prompt, task.context, history
+            )
         except Exception as e:
             self.task_service.provider.change_status(CodeTaskStatus.failed)
             self.task_service.provider.set_error(str(e))
@@ -130,6 +160,12 @@ class WebSocketService:
                     logger.info(
                         f"[{task.id}] Готово после {attempt + 1} попыток валидации"
                     )
+
+                    # Добавляем успешный обмен в историю диалога
+                    task.history.append({"role": "user", "content": task.prompt})
+                    task.history.append({"role": "assistant", "content": code})
+                    logger.info(f"[{task.id}] История диалога: {len(task.history)} сообщений")
+                    
                     return
 
             # Валидация упала — пробуем починить если остались попытки
@@ -148,7 +184,7 @@ class WebSocketService:
                 try:
                     # Передаём модели оригинальный промпт + сломанный код + текст ошибки
                     code = await self.ollama_service.fix_code(
-                        task.prompt, code, error_msg
+                        task.prompt, code, error_msg, history
                     )
                 except Exception as e:
                     self.task_service.provider.change_status(CodeTaskStatus.failed)

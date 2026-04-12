@@ -59,7 +59,7 @@ class OllamaApi:
             logger.error(f"Error parsing response into model {response_model}: {e}")
             raise
 
-    async def create_chat_message(self, system: str, user: str) -> str:
+    async def create_chat_message(self, system: str, user: str, history: list[dict] = []) -> str:
         """
         Базовый вызов Ollama /api/chat.
 
@@ -89,6 +89,7 @@ class OllamaApi:
             },
             "messages": [
                 {"role": "system", "content": system},
+                *history,
                 {"role": "user", "content": "/no_think\n\n" + user},
             ],
         }

@@ -33,3 +33,4 @@ class WebSocketEventStatus(Enum):
     done = "DONE"
     failed = "FAILED"
     error = "ERROR"
+    clarification = "CLARIFICATION"

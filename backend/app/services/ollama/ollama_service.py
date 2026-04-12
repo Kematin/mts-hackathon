@@ -1,7 +1,12 @@
+import json
 from typing import Type
 
 from app.core.config import CONFIG
-from app.core.constant import RETRY_SYSTEM_PROMPT, SYSTEM_PROMPT
+from app.core.constant import (
+    CLARIFIER_SYSTEM_PROMPT,
+    RETRY_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+)
 from app.core.logger import get_logger
 from app.schemas import Code, GenerateRequest
 from app.services.ollama.api import OllamaApi
@@ -22,45 +27,21 @@ class OllamaService:
         validated_snippets = await self.validate_and_fix_code(request.prompt, snippets)
         return validated_snippets
 
-    async def generate_code(self, user_prompt: str, context: str | None = None) -> str:
-        """
-        Генерирует Lua-код по запросу пользователя.
-
-        Использует SYSTEM_PROMPT с правилами платформы MWS Octapi
-        и всеми 8 примерами из публичной выборки (few-shot prompting).
-
-        Args:
-            user_prompt: задача на естественном языке (русский или английский)
-            context:     опциональный JSON с wf.vars контекстом от пользователя
-                        например: '{"wf": {"vars": {"emails": [...]}}}'
-
-        Returns:
-            JSON строка вида: '{"key": "lua{<код>}lua"}'
-        """
+    async def generate_code(
+        self, user_prompt: str, context: str | None = None, history: list[dict] = []
+    ) -> str:
         user_message = user_prompt
         if context:
-            # Добавляем контекст к промпту чтобы модель знала структуру wf.vars
             user_message = f"{user_prompt}\n\nКонтекст:\n{context}"
 
-        raw_answer = await self.api.create_chat_message(SYSTEM_PROMPT, user_message)
+        raw_answer = await self.api.create_chat_message(
+            SYSTEM_PROMPT, user_message, history
+        )
         return self.formatter.extract_json(raw_answer)
 
-    async def fix_code(self, user_prompt: str, broken_code: str, error: str) -> str:
-        """
-        Исправляет Lua-код который не прошёл валидацию.
-
-        Вызывается из run_pipeline в main.py при неудачной валидации.
-        Передаёт модели оригинальный запрос, сломанный код и текст ошибки.
-        Использует отдельный RETRY_SYSTEM_PROMPT — короткий, без примеров.
-
-        Args:
-            user_prompt:  оригинальный запрос пользователя
-            broken_code:  JSON строка с кодом который не прошёл валидацию
-            error:        текст ошибки от lua-sandbox валидатора
-
-        Returns:
-            JSON строка с исправленным кодом
-        """
+    async def fix_code(
+        self, user_prompt: str, broken_code: str, error: str, history: list[dict] = []
+    ) -> str:
         user_message = (
             f"Исходный запрос пользователя: {user_prompt}\n\n"
             f"Код с ошибкой:\n{broken_code}\n\n"
@@ -69,9 +50,36 @@ class OllamaService:
         )
 
         raw_answer = await self.api.create_chat_message(
-            RETRY_SYSTEM_PROMPT, user_message
+            RETRY_SYSTEM_PROMPT, user_message, history
         )
         return self.formatter.extract_json(raw_answer)
+
+    async def clarify(self, user_prompt: str, context: str | None = None) -> dict:
+        """
+        Проверяет нужно ли уточнение перед генерацией.
+
+        Returns:
+            {"need_clarification": True, "question": "вопрос"} — нужно уточнение
+            {"need_clarification": False, "question": ""}      — можно генерировать
+        """
+        user_message = user_prompt
+        if context:
+            user_message = f"{user_prompt}\n\nКонтекст:\n{context}"
+
+        try:
+            raw = await self.api.create_chat_message(
+                CLARIFIER_SYSTEM_PROMPT, user_message
+            )
+            result = self.formatter.extract_json(raw)
+            data = json.loads(result)
+            return {
+                "need_clarification": bool(data.get("need_clarification", False)),
+                "question": data.get("question", ""),
+            }
+        except Exception as e:
+            logger.error(f"Clarifier ошибка: {e}")
+            # При ошибке — не блокируем, просто генерируем
+            return {"need_clarification": False, "question": ""}
 
     async def check_ollama(self) -> bool:
         """
