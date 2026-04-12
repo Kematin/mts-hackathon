@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useRef, useEffect, useState } from "react";
-import { User, Bot, Sparkles, ClipboardCopy } from "lucide-react";
+import { User, Bot, Sparkles, ClipboardCopy, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -22,7 +22,9 @@ export default function ChatWindow({ messages, isLoading, onSuggestionClick }) {
       .catch(err => console.error('Ошибка копирования:', err));
   };
 
-  
+  const handleAddMessage = (newMessage) => {
+    
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -136,8 +138,8 @@ export default function ChatWindow({ messages, isLoading, onSuggestionClick }) {
                               <div className="flex flex-col">
                                 <div className="flex flex-row justify-between align-center background-gray-700 text-gray-300 text-[14px] px-2 py-1 rounded-tl-sm rounded-tr-sm border border-gray-700">
                                   <div>{language}</div>
-                                  <button onClick={() => handleCopy(codeText, blockId)} className="flex flex-row items-center gap-1">
-                                    <ClipboardCopy className="w-4 h-4" />
+                                  <button onClick={() => handleCopy(codeText, blockId)} className="flex flex-row items-center gap-1 text-gray-500 hover:text-white cursor-pointer">
+                                    <ClipboardCopy className="w-4 h-4 " />
                                     {copiedBlockIndex === blockId ? 'Скопированно!' : 'Скопировать'}
                                   </button>
                                 </div>
@@ -182,9 +184,26 @@ export default function ChatWindow({ messages, isLoading, onSuggestionClick }) {
                     {msg.text}
                   </ReactMarkdown>
                 </div>
-                <span className="text-xs text-gray-500 mt-1 px-1">
-                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                {msg.role === "user" ? "" :
+                  (<div className="flex flex-row items-center justify-between w-full my-2 pl-1">
+                    <span className="text-xs text-gray-500">
+                      {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <div className="flex flex-row gap-3 mr-5">
+                      <RotateCcw 
+                        className="w-[18px] h-[18px] text-gray-500 hover:text-white cursor-pointer" 
+                        onClick={() => onSuggestionClick && onSuggestionClick(messages[i - 1]?.text)}
+                      />
+                      <ClipboardCopy 
+                        className="w-[18px] h-[18px] text-gray-500 hover:text-white cursor-pointer" 
+                        onClick={() => navigator.clipboard.writeText(msg.text)}
+                      />
+                    </div>
+                    
+                  </div>)
+                }
+                
+                
               </div>
             </motion.div>
           ))}
