@@ -1,12 +1,28 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { useRef, useEffect } from "react";
-import { User, Bot, Sparkles } from "lucide-react";
+import { useRef, useEffect, useState } from "react";
+import { User, Bot, Sparkles, ClipboardCopy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 export default function ChatWindow({ messages, isLoading, onSuggestionClick }) {
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
+
+  const [copiedBlockIndex, setCopiedBlockIndex] = useState(null);
+
+  // Функция копирования для конкретного блока кода
+  const handleCopy = (codeText, blockId) => {
+    navigator.clipboard.writeText(codeText)
+      .then(() => {
+        setCopiedBlockIndex(blockId);
+        setTimeout(() => setCopiedBlockIndex(null), 2000);
+      })
+      .catch(err => console.error('Ошибка копирования:', err));
+  };
+
+  
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -107,17 +123,39 @@ export default function ChatWindow({ messages, isLoading, onSuggestionClick }) {
                       ol: ({node, ...props}) => <ol className="list-decimal list-inside mb-2 space-y-1 ml-2" {...props} />,
                       li: ({node, ...props}) => <li className="text-sm leading-relaxed" {...props} />,
                       // Customize code blocks
-                      code: ({node, inline, className, children, ...props}) => {
+                      code({ node, inline, className, children, ...props }) {
                         const match = /language-(\w+)/.exec(className || '');
-                        return inline ? (
-                          <code className="px-1.5 py-0.5 rounded bg-black/30 text-xs font-mono" {...props}>
-                            {children}
-                          </code>
-                        ) : (
-                          <code className="block p-2 rounded bg-black/30 text-xs font-mono overflow-x-auto mb-2 whitespace-pre" {...props}>
-                            {children}
-                          </code>
-                        );
+                        const language = match ? match[1] : 'text';
+
+                        const codeText = String(children).replace(/\n$/, '');
+
+                        const blockId = `${language}-${codeText.substring(0, 50).replace(/\s+/g, '')}`;
+                      
+                        return !inline && match ? (
+                              // Блок кода: используем SyntaxHighlighter для подсветки
+                              <div className="flex flex-col">
+                                <div className="flex flex-row justify-between align-center background-gray-700 text-gray-300 text-[14px] px-2 py-1 rounded-tl-sm rounded-tr-sm border border-gray-700">
+                                  <div>{language}</div>
+                                  <button onClick={() => handleCopy(codeText, blockId)} className="flex flex-row items-center gap-1">
+                                    <ClipboardCopy className="w-4 h-4" />
+                                    {copiedBlockIndex === blockId ? 'Скопированно!' : 'Скопировать'}
+                                  </button>
+                                </div>
+                                <SyntaxHighlighter
+                                  style={vscDarkPlus}
+                                  language={language}
+                                  PreTag="div"
+                                  {...props}
+                                >
+                              
+                                  {codeText}
+                                </SyntaxHighlighter>
+                              </div>
+                            ) : (
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            );
                       },
                       pre: ({node, ...props}) => <pre className="mb-2 -mx-2" {...props} />,
                       // Customize links
