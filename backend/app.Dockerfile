@@ -1,4 +1,6 @@
 FROM python:3.12-slim
+ARG API_PORT
+ENV API_PORT=$API_PORT
 
 WORKDIR /app
 
@@ -10,7 +12,5 @@ COPY uv.lock .
 RUN uv sync --frozen
 
 COPY app/ ./app/
-
-EXPOSE 8080
-
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+EXPOSE $API_PORT
+CMD uv run uvicorn app.main:app --host 0.0.0.0 --port $API_PORT

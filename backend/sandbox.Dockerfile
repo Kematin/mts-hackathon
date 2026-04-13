@@ -10,10 +10,10 @@ RUN ln -sf /usr/bin/lua5.4 /usr/bin/lua && \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir flask
+RUN pip install fastapi --no-cache-dir && pip install uvicorn --no-cache-dir
 
-COPY validator.py .
+COPY lua-sandbox/validator.py .
 
-EXPOSE 8081
+EXPOSE $SANDBOX_PORT
 
 CMD ["python", "validator.py"]
