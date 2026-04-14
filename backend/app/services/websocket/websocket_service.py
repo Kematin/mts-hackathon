@@ -62,7 +62,7 @@ class WebSocketService:
         if not task.skip_clarification and not task.context:
             clarification = await self.ollama_service.clarify(task.prompt, task.context)
 
-            if clarification["need_clarification"]:
+            if clarification["need_clarification"] and clarification["question"].strip():
                 await self.send(
                     WebSocketEventStatus.clarification,
                     {"question": clarification["question"]}

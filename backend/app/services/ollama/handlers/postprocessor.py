@@ -4,8 +4,7 @@ from app.services.ollama.handlers.base import Handler, PipelineContext
 
 logger = get_logger(__name__)
 
-FORBIDDEN = ["$.", "JsonPath", "require(", "os.time", "os.date", "io."]
-
+FORBIDDEN = ["$.", "JsonPath", "require(", "os.time", "os.date", "io.", "_utils.array.sum", "_utils.array.sort"]
 
 class PostprocessorHandler(Handler):
     async def process(self, context: PipelineContext) -> PipelineContext:
