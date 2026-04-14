@@ -91,8 +91,14 @@ services:
   frontend:
     env_file:
       - .env
-    image: nginx:alpine
+    build: 
+      context: frontend
+      dockerfile: frontend.Dockerfile
     container_name: frontend
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - FRONTEND_PORT=${FRONTEND_PORT}
     ports:
       - "${FRONTEND_PORT}:80"
     volumes:
@@ -100,6 +106,15 @@ services:
     networks:
       - app_network
     restart: unless-stopped
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+      lua-sandbox:
+        condition: service_started
+      backend:
+        condition: service_started
 
 networks:
   app_network:
