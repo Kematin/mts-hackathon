@@ -1,5 +1,6 @@
 import json
 from typing import Optional
+import re
 
 from fastapi import WebSocket
 
@@ -54,12 +55,15 @@ class WebSocketService:
             return history
         return history[-MAX_HISTORY:]
 
+    def _has_variable_name(self, prompt: str) -> bool:
+        return bool(re.search(r'\b[a-z][a-z0-9]*_[a-z0-9_]+\b', prompt))
+
     async def run_pipeline(self, task: CodeTask):
         self.task_service.set_provider(get_task_provider(task))
 
         # --- Шаг 0: Clarifier — нужно ли уточнение? ---
         # Пропускаем если: пользователь уже ответил на вопрос ИЛИ передан контекст wf.vars
-        if not task.skip_clarification and not task.context:
+        if not task.skip_clarification and not task.context and not self._has_variable_name(task.prompt):
             clarification = await self.ollama_service.clarify(task.prompt, task.context)
 
             if clarification["need_clarification"] and clarification["question"].strip():

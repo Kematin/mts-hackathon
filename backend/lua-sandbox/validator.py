@@ -23,43 +23,50 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Lua Sandbox Validator")
 
-# Таймаут исполнения Lua-кода в секундах.
-# Защищает от бесконечных циклов в сгенерированном коде.
 LUA_TIMEOUT = 5
 
-
-# Имитирует реальное окружение платформы чтобы код можно было исполнить
-# без реальных данных. Используется при втором шаге валидации.
-#
-# wf.vars и wf.initVariables возвращают nil для любого ключа через метатаблицы —
-# это позволяет коду обращаться к переменным без ошибок даже без реальных данных.
 WF_MOCK = """
 -- Mock окружение платформы MWS Octapi
+-- Метатаблицы позволяют коду работать с переменными без реальных данных:
+-- арифметика, конкатенация, сравнения не падают с ошибками типов
+
+local function make_mock_value()
+    return setmetatable({}, {
+        __index = function(t, k) return make_mock_value() end,
+        __newindex = function(t, k, v) rawset(t, k, v) end,
+        __len = function() return 0 end,
+        __add = function(a, b) return type(b) == "number" and b or 0 end,
+        __sub = function(a, b) return type(b) == "number" and -b or 0 end,
+        __mul = function(a, b) return 0 end,
+        __div = function(a, b) return 0 end,
+        __mod = function(a, b) return 0 end,
+        __pow = function(a, b) return 0 end,
+        __concat = function(a, b) return tostring(b) end,
+        __unm = function(a) return 0 end,
+        __lt = function(a, b) return false end,
+        __le = function(a, b) return true end,
+        __eq = function(a, b) return false end,
+        __tostring = function(a) return "" end,
+        __call = function(t, ...) return make_mock_value() end,
+        __ipairs = function(t) return function(t, i) return nil end, t, 0 end,
+        __pairs = function(t) return function(t, k) return nil end, t, nil end,
+    })
+end
+
 wf = {
     vars = setmetatable({}, {
-        __index = function(t, k)
-            -- Возвращаем пустую таблицу для любого ключа
-            -- чтобы цепочки вида wf.vars.foo.bar не падали с nil error
-            return setmetatable({}, {
-                __index = function(t2, k2) return nil end,
-                __len = function() return 0 end,
-            })
-        end
+        __index = function(t, k) return make_mock_value() end
     }),
     initVariables = setmetatable({}, {
         __index = function(t, k) return nil end
     })
 }
 
--- Mock утилиты платформы
 _utils = {
     array = {
-        -- Создаёт новый пустой массив
         new = function()
-            local arr = {}
-            return arr
+            return {}
         end,
-        -- Помечает существующую переменную как массив
         markAsArray = function(arr)
             return arr
         end
@@ -89,18 +96,10 @@ def validate(lua_code: str) -> tuple[bool, str]:
 
     Шаг 1 — Синтаксическая проверка (luac -p):
         Быстрая проверка синтаксиса без исполнения кода.
-        Ловит опечатки, незакрытые блоки, неверные операторы.
 
     Шаг 2 — Исполнение с mock-окружением (lua):
         Запускает код с имитацией wf.vars и _utils.
-        Ловит runtime ошибки: обращение к nil, неверные типы и т.д.
-
-    Args:
-        lua_code: чистый Lua-код без обёртки lua{...}lua
-
-    Returns:
-        (True, "")              — код прошёл оба шага
-        (False, "описание")     — код не прошёл, описание ошибки
+        Ловит runtime ошибки.
     """
 
     # --- Шаг 1: синтаксическая проверка ---
@@ -110,7 +109,7 @@ def validate(lua_code: str) -> tuple[bool, str]:
 
     try:
         result = subprocess.run(
-            ["luac", "-p", tmp_path],  # -p = parse only, не создаёт .out файл
+            ["luac", "-p", tmp_path],
             capture_output=True,
             text=True,
             timeout=LUA_TIMEOUT,
@@ -123,7 +122,6 @@ def validate(lua_code: str) -> tuple[bool, str]:
         os.unlink(tmp_path)
 
     # --- Шаг 2: исполнение с mock-окружением ---
-    # Prepend mock перед кодом пользователя чтобы wf и _utils были доступны
     full_code = WF_MOCK + "\n" + lua_code
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False) as f:
@@ -135,7 +133,7 @@ def validate(lua_code: str) -> tuple[bool, str]:
             ["lua", tmp_path],
             capture_output=True,
             text=True,
-            timeout=LUA_TIMEOUT,  # защита от бесконечных циклов
+            timeout=LUA_TIMEOUT,
         )
         if result.returncode != 0:
             return False, f"Ошибка исполнения: {result.stderr.strip()}"
@@ -164,10 +162,6 @@ def validate_endpoint(body: ValidateRequest):
 def health():
     """
     Проверяет доступность lua и luac интерпретаторов.
-
-    Используется бэкендом и Docker healthcheck.
-
-    Response: {"status": "ok", "lua": true, "luac": true}
     """
     lua_ok = subprocess.run(["lua", "-v"], capture_output=True).returncode == 0
     luac_ok = subprocess.run(["luac", "-v"], capture_output=True).returncode == 0
