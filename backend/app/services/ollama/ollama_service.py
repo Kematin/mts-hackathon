@@ -16,8 +16,9 @@ from app.services.ollama.formatter import OllamaFormatter
 from app.services.ollama.handlers import (
     FixerHandler,
     GeneratorHandler,
-    PipelineContext,
+    PostprocessorHandler,
     ValidatorHandler,
+    PipelineContext,
 )
 
 logger = get_logger(__name__)
@@ -31,13 +32,14 @@ class OllamaService:
 
     def _build_chain_pipeline(self) -> GeneratorHandler:
         generator = GeneratorHandler(self.api)
+        postprocessor = PostprocessorHandler()
         validator = ValidatorHandler(self.api)
         fixer = FixerHandler(self.api)
 
-        generator.set_next(validator).set_next(fixer)
+        generator.set_next(postprocessor).set_next(validator).set_next(fixer)
         return generator
 
-    async def run_pipeline(self, request: GenerateRequest) -> list[Code]:
+    async def run_pipeline(self, request: GenerateRequest) -> str:
         chain = self._build_chain_pipeline()
         context = PipelineContext(prompt=request.prompt)
         try:
@@ -47,8 +49,7 @@ class OllamaService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e),
             )
-
-        return result.snippets
+        return result.raw_json
 
     async def generate_code(
         self, user_prompt: str, context: str | None = None, history: list[dict] = []

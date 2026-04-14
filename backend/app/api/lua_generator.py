@@ -18,17 +18,8 @@ async def generate_endpoint(
     request: GenerateRequest,
     ollama_service: OllamaService = Depends(get_ollama_service),
 ):
-    """
-    Синхронный endpoint генерации Lua-кода.
-
-    Используется жюри и внешними интеграциями согласно OpenAPI контракту.
-    Для фронтенда рекомендуется WebSocket /ws — он даёт живые статусы.
-
-    Request:  {"prompt": "текст задачи"}
-    Response: {"code": "{\"key\": \"lua{...}lua\"}"}
-    """
-    return await ollama_service.run_pipeline(request)
-
+    code = await ollama_service.run_pipeline(request)
+    return {"code": code}
 
 @router.get("/health")
 async def health(

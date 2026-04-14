@@ -13,9 +13,7 @@ from app.services.tasks.get_service import get_task_provider
 
 logger = get_logger(__name__)
 
-# Максимальное количество сообщений в истории
-# Ограничиваем чтобы не переполнить контекст num_ctx=4096
-MAX_HISTORY = 6 
+MAX_HISTORY = 6
 
 class WebSocketService:
     def __init__(
@@ -29,13 +27,6 @@ class WebSocketService:
         self.ws = ws
 
     async def send(self, event: WebSocketEventStatus, data: dict):
-        """
-        Отправляет JSON-событие в WebSocket.
-
-        Формат сообщения: {"event": "<название>", ...доп. поля из data}
-
-        Пример: {"event": "done", "code": "{\"result\": \"lua{...}lua\"}"}
-        """
         await self.ws.send_text(
             json.dumps({"event": event.value, **data}, ensure_ascii=False)
         )
@@ -48,7 +39,7 @@ class WebSocketService:
             return None
 
         prompt = data.get("prompt", "").strip()
-        context = data.get("context")  # JSON строка с wf.vars контекстом, опционально
+        context = data.get("context")
 
         if not prompt:
             await self.send(
@@ -57,33 +48,18 @@ class WebSocketService:
             return None
 
         return WebSocketCodeData(prompt=prompt, context=context)
-    
+
     def _trim_history(self, history: list[dict]) -> list[dict]:
-        """
-        Обрезает историю до MAX_HISTORY последних сообщений.
-        Берём всегда парами (user + assistant) чтобы не сломать контекст.
-        """
         if len(history) <= MAX_HISTORY:
             return history
         return history[-MAX_HISTORY:]
 
     async def run_pipeline(self, task: CodeTask):
-        """
-        Основной агентский pipeline генерации и валидации Lua-кода.
-
-        Шаги:
-            1. Генерация — отправляем промпт в Ollama, получаем JSON с lua{...}lua
-            2. Валидация — извлекаем сниппеты, проверяем каждый в lua-sandbox
-            3. Retry     — если валидация упала, передаём код + ошибку в fixer LLM
-            4. Результат — отправляем done или failed через WebSocket
-
-        Args:
-            task: объект задачи из хранилища tasks
-        """
         self.task_service.set_provider(get_task_provider(task))
 
         # --- Шаг 0: Clarifier — нужно ли уточнение? ---
-        if not task.skip_clarification:
+        # Пропускаем если: пользователь уже ответил на вопрос ИЛИ передан контекст wf.vars
+        if not task.skip_clarification and not task.context:
             clarification = await self.ollama_service.clarify(task.prompt, task.context)
 
             if clarification["need_clarification"]:
@@ -91,7 +67,6 @@ class WebSocketService:
                     WebSocketEventStatus.clarification,
                     {"question": clarification["question"]}
                 )
-                # Сохраняем вопрос в истории чтобы модель помнила что спрашивала
                 task.history.append({"role": "assistant", "content": clarification["question"]})
                 logger.info(f"[{task.id}] Clarifier задал вопрос: {clarification['question']}")
                 return
@@ -136,11 +111,9 @@ class WebSocketService:
             snippets = self.ollama_service.formatter.extract_lua_snippets(code)
 
             if not snippets:
-                # Модель вернула что-то не то — нет lua{...}lua в ответе
                 error_msg = "Не удалось извлечь lua{...}lua сниппеты из ответа модели"
                 logger.warning(f"[{task.id}] {error_msg}")
             else:
-                # Валидируем каждый сниппет по очереди, останавливаемся на первой ошибке
                 all_ok = True
                 error_msg = ""
                 for snippet in snippets:
@@ -153,22 +126,16 @@ class WebSocketService:
                         break
 
                 if all_ok:
-                    # Все сниппеты прошли валидацию — отдаём результат
                     self.task_service.provider.change_status(CodeTaskStatus.done)
                     self.task_service.provider.set_code(code)
                     await self.send(WebSocketEventStatus.done, {"code": code})
-                    logger.info(
-                        f"[{task.id}] Готово после {attempt + 1} попыток валидации"
-                    )
+                    logger.info(f"[{task.id}] Готово после {attempt + 1} попыток валидации")
 
-                    # Добавляем успешный обмен в историю диалога
                     task.history.append({"role": "user", "content": task.prompt})
                     task.history.append({"role": "assistant", "content": code})
                     logger.info(f"[{task.id}] История диалога: {len(task.history)} сообщений")
-                    
                     return
 
-            # Валидация упала — пробуем починить если остались попытки
             if attempt < CONFIG.ai.max_validate_retries:
                 self.task_service.provider.increase_attempts(1)
                 self.task_service.provider.change_status(CodeTaskStatus.processing)
@@ -182,7 +149,6 @@ class WebSocketService:
                 logger.info(f"[{task.id}] Retry {attempt + 1}: {error_msg}")
 
                 try:
-                    # Передаём модели оригинальный промпт + сломанный код + текст ошибки
                     code = await self.ollama_service.fix_code(
                         task.prompt, code, error_msg, history
                     )
@@ -195,7 +161,6 @@ class WebSocketService:
                     )
                     return
             else:
-                # Исчерпали все попытки — отдаём последний вариант с пометкой об ошибке
                 self.task_service.provider.change_status(CodeTaskStatus.failed)
                 self.task_service.provider.set_error(error_msg)
                 await self.send(
@@ -206,7 +171,5 @@ class WebSocketService:
                         "message": "Не удалось пройти валидацию, но вот последний вариант кода",
                     },
                 )
-                logger.warning(
-                    f"[{task.id}] Исчерпаны попытки. Последняя ошибка: {error_msg}"
-                )
+                logger.warning(f"[{task.id}] Исчерпаны попытки. Последняя ошибка: {error_msg}")
                 return

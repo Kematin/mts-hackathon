@@ -63,26 +63,9 @@
     .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #334155; }
     .empty-text { font-size: 14px; }
     .warning-bubble { background: #1a1208; border: 1px solid #854F0B; color: #FAC775; font-size: 13px; padding: 10px 14px; border-radius: 8px; max-width: 80%; }
-    .clarification-bubble {
-      background: #1a1208;
-      border: 1px solid #854F0B;
-      border-radius: 12px;
-      padding: 12px 14px;
-      max-width: 80%;
-    }
-    .clarification-label {
-      font-size: 11px;
-      font-weight: 500;
-      color: #FAC775;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .clarification-text {
-      font-size: 14px;
-      color: #e2e8f0;
-      line-height: 1.6;
-    }
+    .clarification-bubble { background: #1a1208; border: 1px solid #854F0B; border-radius: 12px; padding: 12px 14px; max-width: 80%; }
+    .clarification-label { font-size: 11px; font-weight: 500; color: #FAC775; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .clarification-text { font-size: 14px; color: #e2e8f0; line-height: 1.6; }
   </style>
 </head>
 <body>
@@ -155,8 +138,14 @@
       return div;
     }
 
-    function addUserMessage(text) {
-      addMessage('user', '<div class="bubble user">' + escHtml(text) + '</div>');
+    function addUserMessage(text, hasContext, context) {
+      const badge = hasContext
+        ? ' <span style="font-size:11px; background:#1a2a3a; color:#378ADD; padding:2px 8px; border-radius:4px; margin-left:6px; border: 1px solid #378ADD44;">+ контекст</span>'
+        : '';
+      const contextBlock = hasContext && context
+        ? '<div style="font-size:11px; color:#64748b; margin-top:4px; max-width:80%; text-align:right; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + escHtml(context.slice(0, 60)) + '...</div>'
+        : '';
+      addMessage('user', '<div class="bubble user">' + escHtml(text) + badge + '</div>' + contextBlock);
     }
 
     function addStatus(text, type) {
@@ -227,6 +216,20 @@
       document.getElementById('send-btn').disabled = !ready;
     }
 
+    function addClarificationQuestion(question) {
+      hideEmpty();
+      const msgs = document.getElementById('messages');
+      const div = document.createElement('div');
+      div.className = 'msg agent';
+      div.innerHTML =
+        '<div class="clarification-bubble">' +
+          '<div class="clarification-label">уточняющий вопрос</div>' +
+          '<div class="clarification-text">' + escHtml(question) + '</div>' +
+        '</div>';
+      msgs.appendChild(div);
+      scrollToBottom();
+    }
+
     function connect() {
       ws = new WebSocket(WS_URL);
       ws.onopen = () => {
@@ -290,26 +293,13 @@
       if (!prompt || isProcessing || !ws || ws.readyState !== WebSocket.OPEN) return;
       isProcessing = true;
       setReady(false);
-      addUserMessage(prompt);
-      const payload = { prompt };
       const context = ctx.value.trim();
+      addUserMessage(prompt, !!context, context);
+      const payload = { prompt };
       if (context) payload.context = context;
       ws.send(JSON.stringify(payload));
       input.value = '';
-    }
-
-    function addClarificationQuestion(question) {
-      hideEmpty();
-      const msgs = document.getElementById('messages');
-      const div = document.createElement('div');
-      div.className = 'msg agent';
-      div.innerHTML = 
-        '<div class="clarification-bubble">' +
-          '<div class="clarification-label">уточняющий вопрос</div>' +
-          '<div class="clarification-text">' + escHtml(question) + '</div>' +
-          '</div>';
-      msgs.appendChild(div);
-      scrollToBottom();
+      ctx.value = '';
     }
 
     document.getElementById('prompt-input').addEventListener('keydown', (e) => {

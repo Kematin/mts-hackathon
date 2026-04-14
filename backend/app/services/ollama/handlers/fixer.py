@@ -24,8 +24,8 @@ class FixerHandler(Handler):
         raw_answer = await self.api.create_chat_message(
             RETRY_SYSTEM_PROMPT, user_message, context.history
         )
-        context.snippet.content = OllamaFormatter.extract_json(raw_answer)
-
+        snippet.content = OllamaFormatter.extract_json(raw_answer)
+        
     async def process(self, context: PipelineContext) -> PipelineContext:
         for snippet in context.snippets:
             if not snippet.is_valid:
