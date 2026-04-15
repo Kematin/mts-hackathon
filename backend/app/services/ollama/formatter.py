@@ -34,6 +34,7 @@ class OllamaFormatter:
         # Ищем первый { и последний } — берём всё между ними
         start = raw.find("{")
         end = raw.rfind("}")
+
         if start == -1:
             raise ValueError(f"JSON не найден в ответе модели: {raw!r}")
         if end == -1 or end < start:

@@ -1,4 +1,3 @@
-import json
 from app.core.logger import get_logger
 from app.services.ollama.handlers.base import Handler, PipelineContext
 
@@ -15,19 +14,16 @@ class PostprocessorHandler(Handler):
         for snippet in context.snippets:
             code = snippet.content
 
-            # 1. Не пустой ли код
             if not code or not code.strip():
                 snippet.is_valid = False
                 snippet.validation_error = "Пустой код"
                 continue
 
-            # 2. Есть ли return
             if "return" not in code:
                 snippet.is_valid = False
                 snippet.validation_error = "Отсутствует return в коде"
                 continue
 
-            # 3. Нет ли запрещённых конструкций
             for f in FORBIDDEN:
                 if f in code:
                     snippet.is_valid = False

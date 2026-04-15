@@ -21,6 +21,9 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from dataclasses import dataclass
+
+
 app = FastAPI(title="Lua Sandbox Validator")
 
 LUA_TIMEOUT = 5
@@ -75,15 +78,18 @@ _utils = {
 """
 
 
+@dataclass
 class ValidateRequest(BaseModel):
     code: str
 
 
+@dataclass
 class ValidateResponse(BaseModel):
     ok: bool
     error: str = ""
 
 
+@dataclass
 class HealthResponse(BaseModel):
     status: str
     lua: bool
