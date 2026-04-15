@@ -1,0 +1,124 @@
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  ollama-pull:
+    image: ollama/ollama
+    container_name: ollama-pull-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama API to be ready..."
+        sleep 3
+
+        echo "Pulling model: ${OLLAMA_MODEL}"
+        ollama pull ${OLLAMA_MODEL}
+
+        echo "Verifying model is fully ready..."
+        until ollama run ${OLLAMA_MODEL} "test" 2>/dev/null | grep -q .; do
+          echo "Model still loading into memory, retrying in 2s..."
+          sleep 2
+        done
+
+        echo "Model ${OLLAMA_MODEL} is ready for inference!"
+    restart: "no"
+    networks:
+      - app_network
+
+  lua-sandbox:
+    env_file:
+      - .env
+    build:
+      context: backend
+      dockerfile: sandbox.Dockerfile
+    container_name: lua-sandbox
+    environment:
+      - SANDBOX_PORT=${SANDBOX_PORT}
+    ports:
+      - "${SANDBOX_PORT}:${SANDBOX_PORT}"
+    restart: unless-stopped
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    networks:
+      - app_network
+
+  backend:
+    env_file:
+      - .env
+    build:
+      context: backend
+      dockerfile: ./app.Dockerfile
+    container_name: backend
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL}  # 9b — прод; 2b — тест
+      - VALIDATOR_URL=http://lua-sandbox:8081/validate
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+      lua-sandbox:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - app_network
+
+  frontend:
+    env_file:
+      - .env
+    build: 
+      context: frontend
+      dockerfile: frontend.Dockerfile
+    container_name: frontend
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - FRONTEND_PORT=${FRONTEND_PORT}
+    ports:
+      - "${FRONTEND_PORT}:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    networks:
+      - app_network
+    restart: unless-stopped
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_healthy
+      lua-sandbox:
+        condition: service_started
+      backend:
+        condition: service_started
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  ollama_data:

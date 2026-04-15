@@ -1,0 +1,7 @@
+FROM nginx:stable-alpine
+ARG FRONTEND_PORT
+ENV FRONTEND_PORT=$FRONTEND_PORT
+WORKDIR /app
+COPY . .
+EXPOSE $FRONTEND_PORT
+CMD ["nginx", "-g", "daemon off;"]
